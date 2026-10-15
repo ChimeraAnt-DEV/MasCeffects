@@ -109,7 +109,28 @@ fi
 cp "${PROJECT_DIR}/manifest.json" "${PACKAGE_DIR}/manifest.json"
 cp "${LIBRARY}" "${PACKAGE_DIR}/libmasceffects.so"
 
-# 4. Package. The archive root holds manifest.json, the .so and config/, which
+# 4. Verify the mod's imports against the SDK before packaging. The preloader is
+#    built with -fvisibility=hidden, so a public header can declare something the
+#    built library does not export; importing one fails the load with "missing
+#    symbol" rather than failing the build. Building the preloader is a little
+#    extra work, but shipping a package that cannot load is worse.
+if [[ "${SKIP_SYMBOL_CHECK:-0}" != "1" ]]; then
+  PRELOADER_BUILD_DIR="${PROJECT_DIR}/build/preloader-symbols"
+  if [[ ! -f "${PRELOADER_BUILD_DIR}/libpreloader.so" ]]; then
+    echo "Building the preloader to verify the mod's imports..."
+    cmake -S "${PRELOADER_ROOT}" -B "${PRELOADER_BUILD_DIR}" -G Ninja \
+      -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" \
+      -DANDROID_ABI="${ABI}" \
+      -DANDROID_PLATFORM="${ANDROID_PLATFORM}" \
+      -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" >/dev/null
+    cmake --build "${PRELOADER_BUILD_DIR}" --target preloader >/dev/null
+  fi
+  ANDROID_NDK_HOME="${ANDROID_NDK_HOME}" \
+    PRELOADER_SO="${PRELOADER_BUILD_DIR}/libpreloader.so" \
+    bash "${SCRIPT_DIR}/check-symbols.sh" "${LIBRARY}"
+fi
+
+# 5. Package. The archive root holds manifest.json, the .so and config/, which
 #    is exactly what the importer's validation expects.
 ARCHIVE="${DIST_DIR}/masceffects.chimerapack"
 rm -f "${ARCHIVE}"

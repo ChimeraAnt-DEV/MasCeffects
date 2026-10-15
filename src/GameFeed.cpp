@@ -216,20 +216,20 @@ bool GameFeed::install() {
   if (attempted_) return false;
   attempted_ = true;
 
-  // Resolve the render entry by the diagnostic string its body references rather
-  // than by index: the slot moves between builds, the string does not. This is
-  // the same resolution the preloader's own player-render hook documents, and it
-  // means the feed does not depend on a per-version index the client may not ship.
-  std::size_t slot = 0;
-  std::uintptr_t address = pl::memory::resolveVtableSlotReferencingString(
-      "18LivePlayerRenderer", "variable.player_x_rotation", kGameModule, 64, &slot);
-
-  if (address == 0) {
-    // Fall back to the verified index the client's rules carry for this build.
-    address = pl::memory::resolveVtableFunction("18LivePlayerRenderer", 17,
-                                                kGameModule);
-    slot = 17;
-  }
+  // Resolve the render entry by RTTI name plus slot index. The string-referencing
+  // variant (resolveVtableSlotReferencingString) would need no index, but it is
+  // not actually exported by the preloader despite being declared PL_EXPORT --
+  // the built library carries it as LOCAL HIDDEN -- so importing it would leave
+  // an unresolved symbol. resolveVtableFunction is exported and is what the
+  // preloader's own local-player feed uses.
+  //
+  // The index is the one the client's rules verify for every shipped build
+  // (playerRenderVtableIndex = 17); the executable-address guard below is what
+  // makes a stale index safe, since a wrong slot fails the check instead of
+  // being hooked.
+  constexpr std::size_t kPlayerRenderSlot = 17;
+  const std::uintptr_t address = pl::memory::resolveVtableFunction(
+      "18LivePlayerRenderer", kPlayerRenderSlot, kGameModule);
 
   if (address == 0) {
     status_ = "player-render slot unresolved";
@@ -258,9 +258,10 @@ bool GameFeed::install() {
   }
 
   installed_ = true;
-  status_ = "hook installed (slot " + std::to_string(slot) + ")";
+  status_ = "hook installed (slot " + std::to_string(kPlayerRenderSlot) + ")";
   preloaderLogger.info(
-      "MasCeffects: entity feed installed at 0x{:x} (slot {})", address, slot);
+      "MasCeffects: entity feed installed at 0x{:x} (slot {})", address,
+      kPlayerRenderSlot);
   return true;
 }
 
