@@ -127,7 +127,21 @@ bool WorldRenderer::EnsureReady() {
     gles_ = ResolveGles();
     glesResolved_ = true;
   }
-  if (!gles_.usable() || !gles_.GetBooleanv || !gles_.BlendFunc) {
+  // The presence of the required entry points is checked here rather than with
+  // GlesFunctions::usable(). That method is not part of the SDK's exported
+  // surface -- the preloader is built with -fvisibility=hidden and the method
+  // carries no PL_EXPORT -- so importing it leaves an unresolved symbol that
+  // fails at load time. Reading the fields needs no symbol from the preloader.
+  if (!gles_.GetIntegerv || !gles_.GetBooleanv || !gles_.BlendFunc ||
+      !gles_.CreateShader || !gles_.ShaderSource || !gles_.CompileShader ||
+      !gles_.GetShaderiv || !gles_.CreateProgram || !gles_.AttachShader ||
+      !gles_.LinkProgram || !gles_.GetProgramiv || !gles_.DeleteShader ||
+      !gles_.UseProgram || !gles_.GetUniformLocation ||
+      !gles_.UniformMatrix4fv || !gles_.Uniform4f || !gles_.GenBuffers ||
+      !gles_.BindBuffer || !gles_.BufferData ||
+      !gles_.EnableVertexAttribArray || !gles_.VertexAttribPointer ||
+      !gles_.DrawArrays || !gles_.Enable || !gles_.Disable ||
+      !gles_.DepthMask || !gles_.DeleteBuffers) {
     initFailed_ = true;
     preloaderLogger.warn(
         "MasCeffects: GLES table incomplete; world effects disabled");
