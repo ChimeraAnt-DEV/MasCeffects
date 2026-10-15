@@ -1,0 +1,11 @@
+# Build trees
+build/
+
+# Build output
+dist/
+
+# Editor and OS noise
+.DS_Store
+*.swp
+.vscode/
+.idea/
