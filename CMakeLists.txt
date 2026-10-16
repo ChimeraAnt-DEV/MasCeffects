@@ -105,6 +105,22 @@ if(NOT EXISTS "${PRELOADER_ANDROID_ROOT}/include/pl/Mod.hpp")
       "Missing: ${PRELOADER_ANDROID_ROOT}/include/pl/Mod.hpp")
 endif()
 
+# The preloader loads mods with dlopen(RTLD_NOW | RTLD_GLOBAL) and itself
+# links the *shared* libc++ (libc++_shared.so ships in the client APK). If the
+# mod statically embeds a second copy of libc++ and exports its symbols, those
+# symbols land in the process-global scope and interpose over the preloader's
+# own runtime, which is a classic source of "missing symbol" load failures,
+# duplicate-runtime crashes and undefined behaviour. Use the same shared C++
+# runtime the preloader uses so there is exactly one libc++ in the process.
+set(ANDROID_STL c++_shared)
+
+# Only the registration entry point (PLGetModRegistration, PL_REGISTER_MOD)
+# is part of the mod's public contract. Everything else is internal to the
+# library and must not be exported: the preloader dlopens with RTLD_GLOBAL, so
+# every exported function is added to the process-global symbol scope.
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
 if(ANDROID_ABI)
   set(MASC_OUTPUT_ABI "${ANDROID_ABI}")
 else()
@@ -133,6 +149,14 @@ target_compile_options(masceffects PRIVATE
     $<$<COMPILE_LANG_AND_ID:CXX,Clang,GNU>:-Wall -Wextra -Wpedantic>
     $<$<COMPILE_LANG_AND_ID:CXX,Clang,GNU>:-fvisibility=hidden>
     $<$<COMPILE_LANG_AND_ID:CXX,Clang,GNU>:-fvisibility-inlines-hidden>)
+
+# Internal library symbols (libc++, fmt, the SDK deps) must never leak into the
+# global symbol table. --exclude-libs keeps the bundled static libraries'
+# symbols local even where the visibility flags above cannot reach them.
+target_link_options(masceffects PRIVATE
+    -Wl,--exclude-libs,ALL
+    -Wl,--exclude-libs,libc++_static.a
+    -Wl,--exclude-libs,libc++abi.a)
 
 if(MASC_LOG_LIB)
   target_link_libraries(masceffects PRIVATE "${MASC_LOG_LIB}")

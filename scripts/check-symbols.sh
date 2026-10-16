@@ -91,5 +91,32 @@ if [[ -n "${MISSING}" ]]; then
   exit 1
 fi
 
+# The complementary hazard: the preloader dlopens mods with RTLD_GLOBAL, so any
+# symbol the mod *exports* (other than its registration entry point) is added to
+# the process-global symbol table. A mod that statically embeds libc++ exports a
+# second std::__ndk1 runtime and fmt (hundreds of _ZNSt/_ZN3fmt definitions),
+# which interposes over the preloader's own shared copies and can be misreported
+# as "missing symbol". Fail the build if the .so defines any exported function
+# besides PLGetModRegistration. With -fvisibility=hidden + --exclude-libs the
+# runtime internal symbols are not in .dynsym at all, so a clean build has
+# exactly one.
+"${READELF}" --dyn-syms "${MOD_SO}" \
+  | awk '$7!="UND" && $4=="FUNC" {print $8}' \
+  | grep -v '^$' \
+  | grep -v '^PLGetModRegistration$' \
+  | sort -u > "${TMP_DIR}/unexpected_exports.txt" || true
+
+if [[ -s "${TMP_DIR}/unexpected_exports.txt" ]]; then
+  echo
+  echo "UNEXPECTED EXPORTED SYMBOLS (mod must only export PLGetModRegistration):"
+  sed 's/^/  /' "${TMP_DIR}/unexpected_exports.txt"
+  echo
+  echo "The preloader dlopens mods with RTLD_GLOBAL; exporting internal C++/fmt"
+  echo "symbols pollutes the global symbol table and can interpose over the"
+  echo "preloader's own runtime (misreported as 'missing symbol')."
+  exit 1
+fi
+
 echo
-echo "OK: every imported pl:: symbol is exported by the preloader."
+echo "OK: every imported pl:: symbol is exported by the preloader, and the mod"
+echo "    exports only its registration entry point (PLGetModRegistration)."

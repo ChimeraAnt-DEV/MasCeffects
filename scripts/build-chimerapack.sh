@@ -92,10 +92,18 @@ mkdir -p "${PACKAGE_DIR}/config"
 "${GEN}" "${PACKAGE_DIR}"
 
 # 3. Build the mod library for the device ABI.
+#
+#    -DANDROID_STL=c++_shared is what the client's own preloader build uses
+#    (app/build.gradle passes it), and it matters here: the preloader dlopens
+#    mods with RTLD_GLOBAL, so a mod that statically embeds its own libc++ and
+#    exports its symbols would pollute the process-global symbol table and can
+#    interpose over the preloader's shared runtime. Linking the same shared C++
+#    runtime keeps exactly one libc++ in the process.
 cmake -S "${PROJECT_DIR}" -B "${ANDROID_BUILD_DIR}" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI="${ABI}" \
   -DANDROID_PLATFORM="${ANDROID_PLATFORM}" \
+  -DANDROID_STL=c++_shared \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
   -DPRELOADER_ANDROID_ROOT="${PRELOADER_ROOT}"
 cmake --build "${ANDROID_BUILD_DIR}" --target masceffects
@@ -108,6 +116,9 @@ fi
 
 cp "${PROJECT_DIR}/manifest.json" "${PACKAGE_DIR}/manifest.json"
 cp "${LIBRARY}" "${PACKAGE_DIR}/libmasceffects.so"
+if [[ -f "${PROJECT_DIR}/assets/icon.png" ]]; then
+  cp "${PROJECT_DIR}/assets/icon.png" "${PACKAGE_DIR}/icon.png"
+fi
 
 # 4. Verify the mod's imports against the SDK before packaging. The preloader is
 #    built with -fvisibility=hidden, so a public header can declare something the

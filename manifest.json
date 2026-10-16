@@ -2,8 +2,9 @@
   "type": "preload-native",
   "name": "Mas Effects",
   "author": "ChimeraAnt-DEV",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "entry": "libmasceffects.so",
+  "icon": "icon.png",
   "minecraft_versions": [],
   "overwrite_files": [
     "config/config.json"
