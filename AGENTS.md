@@ -60,6 +60,47 @@ comm -23 want.txt have.txt
 `./scripts/check-symbols.sh` runs exactly this when `PRELOADER_SO` points at a
 built `libpreloader.so`.
 
+### Pitfall: "missing symbol" survives a clean check if it is checked against the wrong preloader
+
+`check-symbols.sh` only proves the mod imports are satisfied by **preloader-android
+HEAD**. It does **not** prove they are satisfied by the `libpreloader.so` inside the
+**released** GlowberryClient APK the user is actually running — and the two differ.
+
+The preloader API grows between client releases. The mod is built against the SDK
+source, but what resolves at load time is the `libpreloader.so` bundled in the user's
+installed APK. A client released on day X cannot export symbols that landed in the
+preloader on day X+N. The 8 `pl::` symbols that trip this on GlowberryClient **OV.2**
+(2026-10-10, preloader before commit `167226d`) are:
+
+| Imported by the mod | Added to preloader |
+| --- | --- |
+| `pl::render::RegisterRenderCallback` | 2026-10-11 (`167226d`) |
+| `pl::render::IsRenderCallbackLive` | 2026-10-11 (`167226d`) |
+| `pl::render::RenderFrameTick` | 2026-10-11 (`167226d`) |
+| `pl::render::ComputeViewProjection` | 2026-10-11 (`167226d`) |
+| `pl::render::ReadLocalPlayerPosition` | 2026-10-11 (`167226d`) |
+| `pl::cosmetics::GlesBackend` | post-OV.2 (`c4ed246`) |
+| `pl::cosmetics::LastGlesError` | post-OV.2 (`c4ed246`) |
+| `pl::memory::isExecutableAddress` | post-OV.2 (`b8aedde`) |
+
+**How to check the right thing.** Do not rebuild the preloader from HEAD and declare
+victory. Instead, pull the **released** client APK (its release assets, e.g.
+`GlowberryClient.apk`), extract its bundled `libpreloader.so` (inside the APK at
+`lib/arm64-v8a/libpreloader.so`), and run `check-symbols.sh` against **that**:
+
+```sh
+unzip -o GlowberryClient.apk "lib/arm64-v8a/libpreloader.so" -d /tmp/glowapk
+PRELOADER_SO=/tmp/glowapk/lib/arm64-v8a/libpreloader.so \
+  scripts/check-symbols.sh dist/arm64-v8a/masceffects/libmasceffects.so
+```
+
+If the released client predates the API the mod needs, the honest fix is on the
+**client** side (ship a newer GlowberryClient build, as the current `main` branch
+with preloader submodule `72b5a7c` does), not a version-gate or manifest tweak in
+this repo. A mod cannot degrade gracefully past a hard linker failure: missing
+symbols abort the load with `UnsatisfiedLinkError` → "Built for a different game
+build (missing symbol)" before any mod code runs.
+
 ### Safe alternatives
 
 - Instead of `GlesFunctions::usable()`, test the individual function pointers

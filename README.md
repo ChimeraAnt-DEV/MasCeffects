@@ -1,5 +1,7 @@
 # MasCeffects
 
+![MasCeffects](assets/icon.png)
+
 Visual PvP effects for **Minecraft: Bedrock Edition**, packaged as a
 `.chimerapack` native mod for [GlowberryClient](https://github.com/ChimeraAnt-DEV/GlowberryClient).
 
@@ -162,6 +164,53 @@ cmake --build build/host
 Import `masceffects.chimerapack` through GlowberryClient's mod import flow. The
 package is a ZIP whose root holds `manifest.json`, `libmasceffects.so` and
 `config/`, which is the layout the importer validates.
+
+### Client version requirement
+
+This mod is built against the preloader SDK API that shipped in GlowberryClient
+builds after **OV.2** (the preloader gained the `pl::render` callback API on
+2026-10-11). On OV.2 the mod **will not load**: the installed `libpreloader.so`
+does not export the `pl::render`, `pl::cosmetics::GlesBackend`/`LastGlesError`
+and `pl::memory::isExecutableAddress` symbols the mod imports, and the loader
+aborts it with *"Built for a different game build (missing symbol)"*.
+
+Use a GlowberryClient build whose bundled preloader includes these exports —
+current `main` does (preloader submodule `72b5a7c`). **Minecraft version is not
+the problem**: an empty `minecraft_versions` manifest means "all versions", and
+the verified version range covers 1.26 through 26.52+. The failure on OV.2 is a
+client/preloader SDK version mismatch, not a game-version gate.
+
+If you still see the missing-symbol error on a newer client, run
+`scripts/check-symbols.sh` against the `libpreloader.so` bundled in your
+installed APK (`lib/arm64-v8a/libpreloader.so`) to name the offending symbols.
+
+### Load-safety: one C++ runtime, one exported symbol
+
+The preloader loads mods with `dlopen(RTLD_NOW | RTLD_GLOBAL)` and itself links
+the **shared** libc++ (`libc++_shared.so`, which ships in the client APK). Two
+build choices keep the mod from colliding with that:
+
+- **`-DANDROID_STL=c++_shared`**: the mod links the *same* shared libc++ the
+  preloader uses instead of statically embedding a second copy. A statically
+  embedded libc++ that then exports its symbols would land hundreds of
+  `std::__ndk1::*`/`fmt::*` symbols in the process-global scope (`RTLD_GLOBAL`),
+  interpose over the preloader's own runtime, and can produce the misleading
+  *"missing symbol"* load failure even when every `pl::` import is correct.
+- **Hidden visibility + `--exclude-libs`**: the mod only exports its single
+  public contract symbol, `PLGetModRegistration`. Everything else is library
+  internal and stays out of the global symbol table.
+
+You can verify a build is clean before shipping:
+
+```sh
+# Only these should be exported by libmasceffects.so (plus the data/rodata it
+# needs): PLGetModRegistration. A fat blob of std::/fmt symbols means the build
+# statically embedded libc++.
+readelf -W --dyn-syms libmasceffects.so | awk '$7!="UND" && $4=="FUNC" {print $8}'
+```
+
+`check-symbols.sh` already converts "imports not exported" into a build failure;
+this is the complementary check that the mod does not *export* a second runtime.
 
 ## Verifying it is live
 
