@@ -1,0 +1,74 @@
+name: build-and-verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ndk: [r28c]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ninja and Python
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build
+          python3 -m pip install --user cmake
+
+      # Pin the preloader to the exact commit the current GlowberryClient main
+      # bundles (app/src/main/cpp/preloader submodule). The mod loads against
+      # *that* preloader, not preloader main, so the symbol check must compare
+      # against the pinned build.
+      - name: Check out preloader-android (pinned to the client's submodule)
+        run: |
+          git init /tmp/preloader
+          cd /tmp/preloader
+          git remote add origin https://github.com/ChimeraAnt-DEV/preloader-android.git
+          git fetch --depth 1 origin 72b5a7c4b6055df170a160b5191c50789a371a73
+          git checkout FETCH_HEAD
+
+      - name: Install Android NDK ${{ matrix.ndk }}
+        run: |
+          curl -sL -o /tmp/ndk.zip \
+            "https://dl.google.com/android/repository/android-ndk-${{ matrix.ndk }}-linux.zip"
+          unzip -q /tmp/ndk.zip -d /tmp/ndk
+          echo "NDK_DIR=$(ls -d /tmp/ndk/android-ndk-*)" >> "$GITHUB_ENV"
+
+      - name: Build and verify the mod package
+        env:
+          ANDROID_NDK_HOME: ${{ env.NDK_DIR }}
+          PRELOADER_ROOT: /tmp/preloader
+          HOME: /root
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          bash scripts/build-chimerapack.sh --clean
+
+      - name: Assert the .so is load-safe (1 export, shared libc++)
+        run: |
+          LIB=dist/arm64-v8a/masceffects/libmasceffects.so
+          exports=$(readelf -W --dyn-syms "$LIB" | awk '$7!="UND" && $4=="FUNC" {print $8}' \
+            | grep -v '^$' | sort -u | wc -l)
+          echo "defined/exported functions: $exports"
+          test "$exports" -eq 1
+          readelf -W --dyn-syms "$LIB" | awk '$7!="UND" && $4=="FUNC" {print $8}' \
+            | grep -qx 'PLGetModRegistration'
+          readelf -W -d "$LIB" | grep -q 'libc++_shared.so' || {
+            echo "ERROR: libmasceffects.so does not link libc++_shared.so" >&2
+            exit 1
+          }
+
+      - name: Upload the .chimerapack
+        uses: actions/upload-artifact@v4
+        with:
+          name: masceffects-${{ matrix.ndk }}
+          path: dist/arm64-v8a/masceffects.chimerapack
+          if-no-files-found: error
